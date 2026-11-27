@@ -22,6 +22,17 @@ In v1:
 
 Not in v1: YouTube, X, TikTok; Instagram API data (v3, needs Meta App Review); API payouts and WhatsApp (v2); Shopify sync (v2); multi-currency (v3); native apps.
 
+**Decision (27 Nov 2026): Reelay is fully managed.** Clients never build or run campaigns; the Reelay team does it in Control Room. No self-serve campaign builder or checkout.
+
+Added to v1:
+
+| Feature | Where | How it works |
+| --- | --- | --- |
+| Bot score on every clip | QA queue, ProofCount | 0 to 100 risk score from the fraud signals (`botScore` in rules.ts) |
+| Timestamped feedback | QA review, Crew App clip detail | Notes pinned to moments in the clip, e.g. "0:03, founder not on screen yet" |
+| Campaign access | Campaign setup (team only) | public (allowed tiers join directly), application (clippers apply, team approves), private (invite only) |
+| Pay models | Campaign setup (team only) | cpm (default), per_post (flat fee per approved post) or retainer (monthly) |
+
 ## Roles
 
 | Role | Portal | Can do | Cannot do |

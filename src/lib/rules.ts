@@ -98,6 +98,38 @@ export function fraudFlags(m: SnapshotMetrics, s: Settings = DEFAULT_SETTINGS): 
   return flags;
 }
 
+/**
+ * Bot score, 0 (looks real) to 100 (almost certainly fake), from the same signals as the fraud flags.
+ * Each signal adds points in proportion to how far past its threshold it is. Shown in QA and ProofCount;
+ * it never decides fraud on its own.
+ */
+export function botScore(m: SnapshotMetrics, s: Settings = DEFAULT_SETTINGS): number {
+  let score = 0;
+  const over = (ratio: number, weight: number) => { score += Math.min(1, Math.max(0, ratio)) * weight; };
+  if (m.views > 0 && m.likes !== undefined) {
+    const likeRate = (m.likes / m.views) * 100;
+    over((s.flagLikeRatePct - likeRate) / s.flagLikeRatePct, 25);
+  }
+  if (m.avgWatchSeconds !== undefined) over((s.flagWatchSeconds - m.avgWatchSeconds) / s.flagWatchSeconds, 25);
+  if (m.indiaShare !== undefined) over((s.flagIndiaSharePct - m.indiaShare * 100) / s.flagIndiaSharePct, 15);
+  if (m.peakSixHourShare !== undefined) over((m.peakSixHourShare * 100 - s.flagSpikePct) / (100 - s.flagSpikePct), 20);
+  if (m.reach !== undefined && m.reach > 0) over((m.views / m.reach - 4) / 4, 15);
+  return Math.round(score);
+}
+
+export interface TimestampedNote { at_seconds: number; note: string }
+
+/** "0:03, founder not on screen yet" */
+export const formatNote = (n: TimestampedNote) =>
+  `${Math.floor(n.at_seconds / 60)}:${String(Math.floor(n.at_seconds % 60)).padStart(2, '0')}, ${n.note}`;
+
+/** What a clip earns under each pay model, in paise. Per-post pays once on approval; retainer is paid monthly outside clips. */
+export function earningsForPayModel(model: 'cpm' | 'per_post' | 'retainer', input: { paidViews: number; ratePaisePer1000: number; perPostPaise?: number | null }): number {
+  if (model === 'cpm') return clipEarningsPaise(input.paidViews, input.ratePaisePer1000);
+  if (model === 'per_post') return input.perPostPaise ?? 0;
+  return 0;
+}
+
 export type SubmissionRejection = 'duplicate_link' | 'missing_caption_code' | 'posted_before_joining' | 'outside_window' | 'campaign_not_live' | 'not_instagram_reel';
 
 /** Checks run the moment a clip is submitted. Returns the first reason to reject, or null. */

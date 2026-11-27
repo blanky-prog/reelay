@@ -1,27 +1,59 @@
-import { requirePortal } from '@/lib/session';
+import Link from 'next/link';
+import { getMe } from '@/lib/session';
 import { supabaseServer } from '@/lib/supabase/server';
-import { Shell } from '../Shell';
+import { getMyClipper } from '@/lib/crew';
+import { formatInr } from '@/lib/rules';
+import { Chip, Stat } from '../ui';
 
-export const dynamic = 'force-dynamic';
-
-export default async function CrewApp() {
-  const me = await requirePortal('crew');
+export default async function CrewHome() {
+  const me = (await getMe())!;
+  const clipper = await getMyClipper(me.id);
   const sb = await supabaseServer();
-  // RLS means these only ever return this clipper's own rows and campaigns open to them.
-  const [{ data: clipper }, { data: campaigns }] = await Promise.all([
-    sb.from('clippers').select('tier, status, strikes').eq('user_id', me.id).maybeSingle(),
-    sb.from('campaigns').select('id, name, status').eq('status', 'live'),
+
+  const [{ data: accounts }, { data: tests }, { data: items }, { count: liveClips }] = await Promise.all([
+    clipper ? sb.from('social_accounts').select('verified_at, verification_requested_at') : Promise.resolve({ data: [] as any[] }),
+    clipper ? sb.from('test_submissions').select('score, created_at').order('created_at', { ascending: false }).limit(1) : Promise.resolve({ data: [] as any[] }),
+    clipper ? sb.from('payout_items').select('amount_paise, status') : Promise.resolve({ data: [] as any[] }),
+    clipper ? sb.from('clips').select('id', { count: 'exact', head: true }).in('status', ['counting', 'locked']) : Promise.resolve({ count: 0 }),
   ]);
 
+  const verified = (accounts ?? []).some((a: any) => a.verified_at);
+  const pendingVerify = (accounts ?? []).some((a: any) => !a.verified_at && a.verification_requested_at);
+  const test = tests?.[0];
+  const paid = (items ?? []).filter((i: any) => i.status === 'paid').reduce((a: number, i: any) => a + Number(i.amount_paise), 0);
+  const pending = (items ?? []).filter((i: any) => i.status === 'pending').reduce((a: number, i: any) => a + Number(i.amount_paise), 0);
+
+  const steps = [
+    { done: !!clipper, label: 'Add your profile, PAN and UPI ID', href: '/crew/profile', note: '' },
+    { done: verified, label: 'Connect your Instagram account', href: '/crew/accounts', note: pendingVerify ? 'Waiting for our check' : '' },
+    { done: test?.score != null && test.score >= 14, label: 'Pass the test brief', href: '/crew/test', note: test && test.score == null ? 'Waiting for review' : test?.score != null && test.score < 14 ? `Scored ${test.score}/20. Try again.` : '' },
+    { done: clipper?.status === 'active', label: 'Get approved', href: '/crew', note: clipper?.status === 'banned' ? 'Account removed' : '' },
+  ];
+  const ready = steps.every((s) => s.done);
+
   return (
-    <Shell title="Crew App" name={me.name} role={me.role}>
+    <div className="stack">
       <h1>Hi {me.name.split(' ')[0]}</h1>
+      {!ready && (
+        <div className="card">
+          <h2>Get set up</h2>
+          <ol className="list">
+            {steps.map((s) => (
+              <li key={s.label} className="row">
+                <span>{s.done ? '✓ ' : ''}<Link href={s.href}>{s.label}</Link></span>
+                {s.done ? <Chip tone="ok">Done</Chip> : s.note ? <Chip tone="warn">{s.note}</Chip> : <Chip>To do</Chip>}
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
       <div className="grid">
-        <div className="card"><div className="muted">Tier</div><strong>{clipper?.tier ?? 'Not set up yet'}</strong></div>
-        <div className="card"><div className="muted">Status</div><strong>{clipper?.status ?? 'Finish your profile'}</strong></div>
-        <div className="card"><div className="muted">Open campaigns</div><strong>{campaigns?.length ?? 0}</strong></div>
+        <Stat label="Tier" value={clipper ? clipper.tier[0].toUpperCase() + clipper.tier.slice(1) : 'Not set up'} />
+        <Stat label="Clips earning" value={liveClips ?? 0} />
+        <Stat label="Next Friday" value={formatInr(pending)} />
+        <Stat label="Paid so far" value={formatInr(paid)} verified />
       </div>
-      <p className="muted" style={{ marginTop: 24 }}>Campaigns, clip submission and earnings arrive in milestone 2.</p>
-    </Shell>
+      {ready && <p><Link className="btn primary" href="/crew/campaigns">See open campaigns</Link></p>}
+    </div>
   );
 }

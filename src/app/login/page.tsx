@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import Link from 'next/link';
 import { supabaseBrowser } from '@/lib/supabase/client';
 import { Logo } from '../Shell';
 
@@ -37,6 +38,7 @@ export default function LoginPage() {
             </div>
             {error && <p className="err" role="alert">{error}</p>}
             <button className="primary" type="submit" disabled={busy}>{busy ? 'Signing in...' : 'Sign in'}</button>
+            <p className="muted">Want to clip for Reelay? <Link href="/signup">Join the Crew</Link></p>
           </form>
         </div>
       </main>

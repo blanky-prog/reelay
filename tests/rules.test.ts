@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_SETTINGS as S, buildPayoutRun, capToCampaign, captionCode, checkSubmission, clipEarningsPaise,
+  DEFAULT_SETTINGS as S, botScore, buildPayoutRun, earningsForPayModel, formatNote, capToCampaign, captionCode, checkSubmission, clipEarningsPaise,
   formatInr, fraudFlags, liveCheck, lockClip, normaliseReelUrl, paidViews, splitPayout,
 } from '../src/lib/rules';
 
@@ -111,4 +111,27 @@ describe('caption codes', () => {
 
 it('settings defaults match the spec', () => {
   expect(S).toMatchObject({ minViews: 10_000, lockDay: 14, liveCheckDay: 30, lockSharePct: 70, minPayoutPaise: 50_000, perClipCapViews: 500_000 });
+});
+
+describe('bot score', () => {
+  it('is 0 for a clean clip', () => {
+    expect(botScore({ views: 100_000, reach: 80_000, likes: 5_000, avgWatchSeconds: 7, indiaShare: 0.93, peakSixHourShare: 0.2 })).toBe(0);
+  });
+  it('is high for bought views', () => {
+    expect(botScore({ views: 90_000, reach: 15_000, likes: 50, avgWatchSeconds: 0.5, indiaShare: 0.2, peakSixHourShare: 0.98 })).toBeGreaterThan(70);
+  });
+  it('stays between 0 and 100', () => {
+    const v = botScore({ views: 1_000_000, reach: 1, likes: 0, avgWatchSeconds: 0, indiaShare: 0, peakSixHourShare: 1 });
+    expect(v).toBe(100);
+  });
+});
+
+describe('timestamped feedback and pay models', () => {
+  it('formats notes like 0:03, ...', () => expect(formatNote({ at_seconds: 3, note: 'founder not on screen yet' })).toBe('0:03, founder not on screen yet'));
+  it('formats minutes', () => expect(formatNote({ at_seconds: 75, note: 'music' })).toBe('1:15, music'));
+  it('cpm pays per view, per_post pays flat, retainer pays nothing per clip', () => {
+    expect(earningsForPayModel('cpm', { paidViews: 100_000, ratePaisePer1000: 2500 })).toBe(250_000);
+    expect(earningsForPayModel('per_post', { paidViews: 100_000, ratePaisePer1000: 2500, perPostPaise: 150_000 })).toBe(150_000);
+    expect(earningsForPayModel('retainer', { paidViews: 100_000, ratePaisePer1000: 2500 })).toBe(0);
+  });
 });

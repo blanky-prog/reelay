@@ -1,7 +1,7 @@
 // Runs the real migration in an in-memory Postgres (PGlite) with a small stand-in
 // for Supabase's auth schema, then checks who can see and change what.
 import { PGlite } from '@electric-sql/pglite';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 
@@ -15,6 +15,8 @@ const id = {
   campA: '00000000-0000-0000-0000-000000000051', campB: '00000000-0000-0000-0000-000000000052',
   clip1: '00000000-0000-0000-0000-000000000061', clip2: '00000000-0000-0000-0000-000000000062', clip3: '00000000-0000-0000-0000-000000000063',
   run1: '00000000-0000-0000-0000-000000000071',
+  campPriv: '00000000-0000-0000-0000-000000000053', campApp: '00000000-0000-0000-0000-000000000054', campPub: '00000000-0000-0000-0000-000000000055',
+  clipU3: '00000000-0000-0000-0000-000000000023', k3: '00000000-0000-0000-0000-000000000033',
 };
 
 let db: PGlite;
@@ -26,7 +28,7 @@ async function as<T = any>(userId: string, sql: string): Promise<T[]> {
     const r = await db.query<T>(sql);
     return r.rows;
   } finally {
-    await db.exec('reset role;');
+    await db.exec(`reset role; select set_config('request.jwt.claim.sub', '', false);`);
   }
 }
 
@@ -41,7 +43,10 @@ beforeAll(async () => {
       $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
     grant usage on schema auth to authenticated;
   `);
-  await db.exec(readFileSync(join(__dirname, '../supabase/migrations/0001_init.sql'), 'utf8'));
+  const dir = join(__dirname, '../supabase/migrations');
+  for (const f of readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()) {
+    await db.exec(readFileSync(join(dir, f), 'utf8'));
+  }
   await db.exec(`
     grant usage on schema public to authenticated;
     grant select, insert, update, delete on all tables in schema public to authenticated;
@@ -65,6 +70,12 @@ beforeAll(async () => {
     insert into campaigns (id, organisation_id, name, package, view_target, status) values
       ('${id.campA}','${id.orgA}','Founder Podcast','relay',3000000,'live'),
       ('${id.campB}','${id.orgB}','Other brand','first_leg',1000000,'live');
+    insert into campaigns (id, organisation_id, name, package, view_target, status, visibility) values
+      ('${id.campPriv}','${id.orgA}','Private','custom',100000,'live','private'),
+      ('${id.campApp}','${id.orgA}','Apply','custom',100000,'live','application'),
+      ('${id.campPub}','${id.orgA}','Open','custom',100000,'live','public');
+    insert into users (id, name, email, role) values ('${id.clipU3}','Kabir','kabir@x.test','clipper');
+    insert into clippers (id, user_id, tier, status) values ('${id.k3}','${id.clipU3}','rookie','active');
     insert into campaign_members (campaign_id, clipper_id) values ('${id.campA}','${id.k1}'),('${id.campA}','${id.k2}');
     insert into clips (id, campaign_id, clipper_id, social_account_id, reel_url, caption_code, posted_at, status) values
       ('${id.clip1}','${id.campA}','${id.k1}','${id.s1}','instagram.com/reel/one','RLY-AAAAA',now(),'locked'),
@@ -80,8 +91,11 @@ beforeAll(async () => {
 
 describe('clients', () => {
   it('see only their own campaigns', async () => {
-    const rows = await as(id.clientA, 'select id from campaigns');
-    expect(rows.map((r: any) => r.id)).toEqual([id.campA]);
+    const ids = (await as(id.clientA, 'select id from campaigns')).map((r: any) => r.id);
+    expect(ids).toContain(id.campA);
+    expect(ids).not.toContain(id.campB);
+    const idsB = (await as(id.clientB, 'select id from campaigns')).map((r: any) => r.id);
+    expect(idsB).toEqual([id.campB]);
   });
   it('see only verified clips, never ones in review, and never another brand', async () => {
     const rows = await as(id.clientA, 'select id from clips order by id');
@@ -152,5 +166,47 @@ describe('audit log', () => {
   });
   it('is invisible to non-admins', async () => {
     expect(await as(id.qa, 'select * from audit_log')).toHaveLength(0);
+  });
+});
+
+describe('campaign access (public, application, private)', () => {
+  it('private campaigns are invisible to non-members', async () => {
+    const rows = await as(id.clipU3, 'select name from campaigns order by name');
+    expect(rows.map((r: any) => r.name)).not.toContain('Private');
+    expect(rows.map((r: any) => r.name)).toEqual(expect.arrayContaining(['Apply', 'Open']));
+  });
+  it('clippers can join public campaigns directly', async () => {
+    await as(id.clipU3, `insert into campaign_members (campaign_id, clipper_id) values ('${id.campPub}','${id.k3}')`);
+    expect(await as(id.clipU3, 'select * from campaign_members')).toHaveLength(1);
+  });
+  it('but must apply to application campaigns', async () => {
+    await expect(as(id.clipU3, `insert into campaign_members (campaign_id, clipper_id) values ('${id.campApp}','${id.k3}')`)).rejects.toThrow();
+    await as(id.clipU3, `insert into campaign_applications (campaign_id, clipper_id, note) values ('${id.campApp}','${id.k3}','Food niche, 3 years editing')`);
+    expect(await as(id.clipU3, 'select status from campaign_applications')).toEqual([{ status: 'pending' }]);
+  });
+  it('cannot apply to private campaigns or approve themselves', async () => {
+    await expect(as(id.clipU3, `insert into campaign_applications (campaign_id, clipper_id) values ('${id.campPriv}','${id.k3}')`)).rejects.toThrow();
+    await as(id.clipU3, `update campaign_applications set status = 'approved'`);
+    expect(await as(id.clipU3, 'select status from campaign_applications')).toEqual([{ status: 'pending' }]);
+  });
+});
+
+describe('account verification and KYC', () => {
+  it('clippers cannot verify their own Instagram account', async () => {
+    await as(id.clipU3, `insert into social_accounts (clipper_id, handle, verified_at) values ('${id.k3}','kabir.clips', now())`);
+    const [row] = await db.query<any>(`select verified_at from social_accounts where handle = 'kabir.clips'`).then((r) => r.rows);
+    expect(row.verified_at).toBeNull();
+    await expect(as(id.clipU3, `update social_accounts set verified_at = now() where handle = 'kabir.clips'`)).rejects.toThrow(/network team/);
+  });
+  it('changing PAN resets the name match', async () => {
+    await db.exec(`update clippers set name_match_status = 'matched' where id = '${id.k3}'`);
+    await as(id.clipU3, `update clippers set pan_encrypted = 'v1:new' where id = '${id.k3}'`);
+    const [row] = await db.query<any>(`select name_match_status from clippers where id = '${id.k3}'`).then((r) => r.rows);
+    expect(row.name_match_status).toBe('pending');
+  });
+  it('test submissions cannot be self-scored', async () => {
+    await expect(as(id.clipU3, `insert into test_submissions (clipper_id, links, score) values ('${id.k3}', array['instagram.com/reel/a'], 20)`)).rejects.toThrow();
+    await as(id.clipU3, `insert into test_submissions (clipper_id, links) values ('${id.k3}', array['instagram.com/reel/a','instagram.com/reel/b'])`);
+    expect(await as(id.clipU1, 'select * from test_submissions')).toHaveLength(0);
   });
 });
