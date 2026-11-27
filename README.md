@@ -20,7 +20,7 @@ Everyone signs in at `/login` and lands in the portal for their role. Read [SPEC
 ## Run it locally
 
 1. Install: `npm install`
-2. Create a Supabase project. In its SQL editor, run the files in `supabase/migrations` in order (`0001`, `0002`, `0003`), or use the Supabase CLI: `supabase db push`.
+2. Create a Supabase project. In its SQL editor, run the files in `supabase/migrations` in order (`0001` to `0004`), or use the Supabase CLI: `supabase db push`.
 3. Copy `.env.example` to `.env.local` and fill in your project URL, anon key and a new `REELAY_DATA_KEY`:
    `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`
 4. `npm run dev` and open http://localhost:3000
@@ -46,8 +46,8 @@ npm run build
 | --- | --- | --- |
 | 1 | Setup, logins, roles, full database with RLS, business rules with tests | Done |
 | 2 | Crew App: sign-up, KYC, bio-code check, test brief, campaigns (public, application, private), submit clip, my clips, Insights recording upload, earnings | Done |
-| 3 | Control Room: clients, campaign setup (access type, pay model), QA queue with bot score and timestamped feedback, flags, verification, clippers, audit log | Next |
-| 4 | Jobs: snapshot reminders, fraud rules, count lock, live check, campaign cap, payout runs and UPI file | |
+| 3 | Control Room: clients, people and roles, campaign setup (access type, pay model, brief, files, promo codes, applications, invites), clipper approval and test scoring, account verification, QA queue with bot score and timestamped feedback, view verification with fraud rules, flags and strikes, audit log | Done |
+| 4 | Jobs: snapshot reminders, count lock, live check, campaign cap, payout runs and UPI file | Next |
 | 5 | Reelay Live: dashboard, ProofCount, clips, audience, sales, PDF reports, billing | |
 | 6 | Hardening: 2FA for team, security review, email notifications, deploy to Vercel | |
 

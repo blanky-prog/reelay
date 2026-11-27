@@ -210,3 +210,26 @@ describe('account verification and KYC', () => {
     expect(await as(id.clipU1, 'select * from test_submissions')).toHaveLength(0);
   });
 });
+
+describe('strikes (QA)', () => {
+  it('QA can give strikes but cannot change tier directly', async () => {
+    await expect(as(id.qa, `update clippers set tier = 'anchor' where id = '${id.k1}'`)).resolves.toBeDefined();
+    const [t] = await db.query<any>(`select tier from clippers where id = '${id.k1}'`).then((r) => r.rows);
+    expect(t.tier).toBe('runner');
+    const [r] = await as(id.qa, `select add_strike('${id.k1}') as s`);
+    expect((r as any).s).toBe(1);
+  });
+  it('third strike bans the clipper', async () => {
+    await as(id.qa, `select add_strike('${id.k1}')`);
+    await as(id.qa, `select add_strike('${id.k1}')`);
+    const [row] = await db.query<any>(`select strikes, status from clippers where id = '${id.k1}'`).then((r) => r.rows);
+    expect(row).toEqual({ strikes: 3, status: 'banned' });
+  });
+  it('clippers cannot give strikes', async () => {
+    await expect(as(id.clipU2, `select add_strike('${id.k2}')`)).rejects.toThrow(/QA or network/);
+  });
+  it('control room counts are team only', async () => {
+    expect(await as(id.clipU2, 'select * from control_room_counts()')).toHaveLength(0);
+    expect(await as(id.qa, 'select * from control_room_counts()')).toHaveLength(1);
+  });
+});
